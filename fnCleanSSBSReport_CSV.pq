@@ -1,0 +1,55 @@
+let
+  fnCleanSSBSReport_CSV = (Paste_Reports_Folder_Path_Here as text, Reports_Name_Common_Pattern_eg.SalesReport as text) =>
+
+    let
+      Source = Folder.Files(Paste_Reports_Folder_Path_Here), 
+      FilteredFiles = Table.SelectRows(Source, each Text.StartsWith([Name], Reports_Name_Common_Pattern_eg.SalesReport)), 
+      FilterTempolaryFiles = Table.SelectRows(FilteredFiles, each not Text.StartsWith([Name], "~$")), 
+      GetExcelContent = Table.TransformColumns(FilterTempolaryFiles, {"Content", each Excel.Workbook(_)}), 
+      ExpandData = Table.ExpandTableColumn(GetExcelContent, "Content", {"Data", "Kind"}), 
+      FilterSheet = Table.SelectRows(ExpandData, each ([Kind] = "Sheet")), 
+      TransformData = Table.Combine(
+        Table.TransformColumns(
+          FilterSheet, 
+          {
+            "Data", 
+            each 
+              let
+                PromoteHeaders = Table.PromoteHeaders(Table.Skip(_, List.PositionOf(_[Column1], "SLSMAN_CD"))), 
+                SelectColumns = Table.SelectColumns(PromoteHeaders, {"Group1", "SLSMAN_NAME", "PRD_DESC", "Textbox7"}), 
+                RenameColumns = Table.RenameColumns(
+                  SelectColumns, 
+                  {{"SLSMAN_NAME", "Salesman"}, {"PRD_DESC", "Product"}, {"Textbox7", "Sales"}}
+                ), 
+                FilterSaleCol = Table.SelectRows(RenameColumns, each [Sales] <> 0 and [Sales] <> null and [Group1] <> "Returnable")
+              in
+                FilterSaleCol
+          }
+        )[Data]
+      ), 
+  ProdMaster = Excel.Workbook(Web.Contents("https://drive.google.com/uc?export=download&id=1KuCrfQhRu3YNTucfP2jUVdDaEv9FA881")), 
+  Products = Table.Distinct(ProdMaster{[Item = "ProductMasterData", Kind = "Table"]}[Data], {"Product"}), 
+  Merge = Table.NestedJoin(
+    TransformData, 
+    {"Product"}, 
+    Products, 
+    {"Product"}, 
+    "SSBS_Report_CSV_WithoutDate_1", 
+    JoinKind.LeftOuter
+  ), 
+  Expand = Table.ExpandTableColumn(
+    Merge, 
+    "SSBS_Report_CSV_WithoutDate_1", 
+    {"Product_Code", "Category", "Sub_Category", "Brand", "Case _Conv"}, 
+    {"Product_Code", "Category", "Sub_Category", "Brand", "Case _Conv"}
+  ), 
+  SalesQtyCol = Table.AddColumn(Expand, "Sales_Cs", each Number.Round([Case _Conv] * [Sales],2), type number), 
+  SelectColumns = Table.SelectColumns(
+    SalesQtyCol, 
+    {"Salesman", "Product_Code", "Product", "Category", "Sub_Category", "Brand","Sales", "Sales_Cs"}
+  )
+in
+  SelectColumns
+
+in 
+fnCleanSSBSReport_CSV
