@@ -3,7 +3,7 @@ let
 
     let
       Source = Folder.Files(Paste_Reports_Folder_Path_Here), 
-      FilteredFiles = Table.SelectRows(Source, each Text.StartsWith([Name], Reports_Name_Common_Pattern_eg.SalesReport)), 
+      FilteredFiles = Table.SelectRows(Source, each Text.Contains([Name], Reports_Name_Common_Pattern_eg.SalesReport)), 
       FilterTempolaryFiles = Table.SelectRows(FilteredFiles, each not Text.StartsWith([Name], "~$")), 
       GetExcelContent = Table.TransformColumns(FilterTempolaryFiles, {"Content", each Excel.Workbook(_)}), 
       ExpandData = Table.ExpandTableColumn(GetExcelContent, "Content", {"Data", "Kind"}), 
@@ -34,12 +34,12 @@ let
     {"Product"}, 
     Products, 
     {"Product"}, 
-    "SSBS_Report_CSV_WithoutDate_1", 
+    "Table", 
     JoinKind.LeftOuter
   ), 
   Expand = Table.ExpandTableColumn(
     Merge, 
-    "SSBS_Report_CSV_WithoutDate_1", 
+    "Table", 
     {"Product_Code", "Category", "Sub_Category", "Brand", "Case _Conv"}, 
     {"Product_Code", "Category", "Sub_Category", "Brand", "Case _Conv"}
   ), 
