@@ -1,0 +1,110 @@
+let
+    // Function Definition
+    fnDSRReport = (FilePath as text, FileName as text) as table =>
+    let
+        // Step 1: Get list of all files in the specified folder
+        Source = Folder.Files(FilePath),
+
+        // Step 2: Filter files by name to match FileName pattern
+        FilterDSRFiles = Table.SelectRows(Source, each Text.Contains([Name], FileName)),
+
+        // Step 3: Extract content from Excel workbooks in the filtered files
+        Content = Table.AddColumn(FilterDSRFiles, "Custom", each Excel.Workbook([Content])),
+
+        // Step 4: Expand file content to get sheet names and data
+        ExpandList = Table.ExpandTableColumn(Content, "Custom", {"Name", "Data"}, {"Name.1", "Data"}),
+
+        // Step 5: Skip first 4 rows and promote 5th row to headers
+        SkipRowsPromoteHeaders = Table.AddColumn(ExpandList, "Custom", each Table.PromoteHeaders(Table.Skip([Data], 4))),
+
+        // Step 6: Remove unnecessary columns (keep Name.1 and Custom)
+        RemoveCols = Table.SelectColumns(SkipRowsPromoteHeaders, {"Name.1", "Custom"}),
+
+        // Step 7: Get all column names in the data to identify relevant columns
+        ColNames = Table.ColumnNames(Table.Combine(RemoveCols[Custom])),
+
+        // Step 8: Filter for main columns
+        MainCols = List.Select(ColNames, each _ = "" or _ = "Customer" or _ = "Time-In" or _ = "Time-Out" or _ = "Date"),
+
+        // Step 9: Expand data columns
+        ExpandData = Table.ExpandTableColumn(RemoveCols, "Custom", MainCols),
+
+        // Step 10: Fill down missing values
+        FillDownNames = Table.FillDown(ExpandData, {"", "Customer"}),
+
+        // Step 11: Rename columns
+        RenameCols = Table.RenameColumns(
+            FillDownNames,
+            {{"Name.1", "VsmName"}, {"Customer", "Outlet Name"}, {"", "Outlet Code"}, {"Time-In", "TimeIn"}, {"Time-Out", "TimeOut"}}
+        ),
+
+        // Step 12: Filter rows
+        FilterRows = Table.SelectRows(RenameCols, each Text.StartsWith([Outlet Code], "KE") and ([TimeIn] <> "")),
+
+        // Step 13: Remove duplicates
+        RemoveDuplicates = Table.Distinct(FilterRows, {"Outlet Code", "TimeIn", "Date"}),
+
+        // Step 14: Set time data types
+        TimeDataType = Table.TransformColumnTypes(RemoveDuplicates, {{"TimeIn", type time}, {"TimeOut", type time}}),
+
+        // Step 15: Calculate Call Duration
+        CallDurationColumn = Table.AddColumn(TimeDataType, "Call Duration", each Duration.Minutes([TimeOut] - [TimeIn])),
+
+        // Step 16: Sort data
+        SortColumns = Table.Sort(CallDurationColumn, {{"VsmName", Order.Ascending}, {"TimeIn", Order.Ascending}}),
+
+        // Step 17: Group and add index
+        GroupAddIndexColumn = Table.Group(
+            SortColumns,
+            {"VsmName", "Date"},
+            {"Data", each Table.AddIndexColumn(_, "Index", 0, 1, Int64.Type), type table}
+        ),
+
+        // Step 18: Calculate previous TimeOut
+        GetPreviousOutletTimeout = Table.AddColumn(
+            GroupAddIndexColumn,
+            "Custom",
+            each
+                let
+                    AllData = [Data],
+                    PrvTimeOut = Table.AddColumn(AllData, "PreviousTOut", each try AllData[TimeOut]{[Index] - 1} otherwise null)
+                in
+                    PrvTimeOut
+        ),
+
+        // Step 19: Select and expand relevant columns
+        SelectCol = Table.SelectColumns(GetPreviousOutletTimeout, {"Custom"}),
+        ExpandCol = Table.ExpandTableColumn(
+            SelectCol,
+            "Custom",
+            {"VsmName", "Outlet Code", "Outlet Name", "Date", "TimeIn", "TimeOut", "Call Duration", "Index", "PreviousTOut"}
+        ),
+
+        // Step 20: Calculate Receipt Interval
+        TimeBetweenCalls = Table.AddColumn(
+            ExpandCol,
+            "Receipt Interval",
+            each Number.Round(Duration.TotalMinutes([TimeIn] - [PreviousTOut]), 2)
+        ),
+
+        // Step 21: Remove unnecessary columns
+        RemoveColumns = Table.RemoveColumns(TimeBetweenCalls, {"Index", "PreviousTOut"}),
+
+        // Step 22: Transform final data types
+        AddDataType = Table.TransformColumnTypes(
+            RemoveColumns,
+            {
+                {"Date", type date},
+                {"Outlet Name", type text},
+                {"Outlet Code", type text},
+                {"VsmName", type text},
+                {"TimeIn", type time},
+                {"TimeOut", type time},
+                {"Receipt Interval", type number},
+                {"Call Duration", type number}
+            }
+        )
+    in
+        AddDataType
+    in 
+    fnDSRReport
