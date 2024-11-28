@@ -1,0 +1,80 @@
+let 
+  CallPerformanceNew = (FolderPath as text, NamePattern as text) =>
+
+let
+  Source = Folder.Files(FolderPath),
+  FilteredFiles = Table.SelectRows(Source, each Text.Contains([Name], NamePattern)),
+  FilterTempolaryFiles = Table.SelectRows(FilteredFiles, each not Text.StartsWith([Name], "~$")),
+  GetExcelContent = Table.TransformColumns(
+    FilterTempolaryFiles,
+    {"Content", each Table.SelectRows(Excel.Workbook(_), each [Kind] = "Sheet")}
+  ),
+  ExpandCustom = Table.ExpandTableColumn(GetExcelContent, "Content", {"Data"}),
+  SFEColumnNames =
+    let
+      ReportName = {
+        "Salesman ",
+        "Call#(lf)A",
+        "Plan #(lf)B",
+        "Extra#(lf)C",
+        "Plan Visited#(lf)F",
+        "vs Planned#(lf)B/A",
+        "vs Planned#(lf)D/A",
+        "Spirits",
+        "Beer",
+        "Alcohilic Pre-mix Drink"
+      },
+      NewName = {
+        "Salesman",
+        "JP Planned Calls",
+        "Visited On JP",
+        "Extra Calls",
+        "JP Successful Calls",
+        "%JP Adherence",
+        "%Route Coverage",
+        "%Spirits StrikeRate",
+        "%Beer  StrikeRate",
+        "%RTD StrikeRate"
+      },
+      SFEColumnNames = Table.FromColumns({ReportName, NewName}, {"ReportName", "NewName"})
+    in
+      SFEColumnNames,
+  TransformData = Table.Combine(
+    Table.TransformColumns(
+      ExpandCustom,
+      {
+        "Data",
+        each
+          let
+            PromoteHeaders = Table.PromoteHeaders(Table.Skip(_, List.PositionOf([Column1], "Salesman "))),
+            SelectColumns  = Table.SelectColumns(PromoteHeaders, SFEColumnNames[ReportName]),
+            RenameColumns  = Table.RenameColumns(SelectColumns, Table.ToRows(SFEColumnNames)),
+            RemoveError    = Table.RemoveRowsWithErrors(RenameColumns, {"Salesman"}),
+            RemoveNulls    = Table.SelectRows(RemoveError, each [Salesman] <> null and [Salesman] <> "")
+          in
+            RemoveNulls
+      }
+    )[Data]
+  ),
+  DistributorColumn = Table.TransformColumns(TransformData, {"Salesman", each Text.Replace(_, "Merchandiser", " Distributor")}),
+  SplitVsmName = Table.SplitColumn(DistributorColumn, "Salesman", Splitter.SplitTextByEachDelimiter({" "}), {"Vsm.1", "Salesman"}),
+  DeleteCols = Table.RemoveColumns(SplitVsmName, {"Vsm.1"}),
+  DataType = Table.TransformColumnTypes(
+    DeleteCols,
+    {
+      {"JP Planned Calls", type number},
+      {"Visited On JP", type number},
+      {"Extra Calls", type number},
+      {"JP Successful Calls", type number},
+      {"%JP Adherence", type number},
+      {"%Route Coverage", type number},
+      {"%Spirits StrikeRate", type number},
+      {"%Beer  StrikeRate", type number},
+      {"%RTD StrikeRate", type number}
+    }
+  )
+in
+  DataType
+
+in 
+  CallPerformanceNew
